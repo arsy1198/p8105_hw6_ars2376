@@ -13,11 +13,15 @@ library(tidyverse)
 library(dplyr)
 library(ggplot2)
 library(modelr)
+library(broom)
+library(purrr)
 ```
 
 ## Problem 1
 
-```{r}
+Clean and filter homicide data
+
+```{r, warning = FALSE}
 homicides_df = read.csv("homicide-data.csv") |>
   mutate(city_state = paste(city, state, sep = ", "), 
          solved_homicide = if_else(disposition == "Closed by arrest", 1, 0)) |> 
@@ -30,3 +34,53 @@ homicides_df = read.csv("homicide-data.csv") |>
 
 ```
 
+Logistic regression for Baltimore, MD
+
+```{r}
+baltimore_df = homicides_df |> 
+  filter(
+    city_state == "Baltimore, MD")
+  
+baltimore_log = glm(solved_homicide ~ victim_age + victim_sex + victim_race, family = binomial, data = baltimore_df) |> broom::tidy(conf.int = TRUE, exponentiate = TRUE)
+
+male_or = baltimore_log |> 
+  filter(term == "victim_sexMale") |> 
+  select(term, estimate, conf.low, conf.high)
+
+print(male_or)
+
+```
+
+Adjusted OR and CI for each city
+
+```{r, warning = FALSE}
+allcities_log = homicides_df |> 
+  group_by(city_state) |> 
+  nest() |> 
+  mutate(
+    log_model = map(data, ~glm(
+      solved_homicide ~ victim_age + victim_sex + victim_race, family = binomial, data = .x
+    )),
+  allcities_tidy = map(log_model, ~tidy(.x, conf.int = TRUE, exponentiate = TRUE))
+  ) |> 
+  unnest(allcities_tidy) |> 
+  filter(term == "victim_sexMale") |> 
+  select(city_state, estimate, conf.low, conf.high)
+```
+
+Plot of estimated ORs and CIs for each city
+
+```{r}
+allcities_log |> 
+  ggplot(aes(reorder(city_state, estimate), estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin=conf.low, ymax = conf.high)) +
+  coord_flip()+
+  labs(
+    title = "Adjusted Odds Ratio of Solved Homicides by City",
+    x = "City, State",
+    y = "OR, Male vs. Female "
+  )
+```
+
+For most cities, the adjusted odds ratio is less than 1, which entails that homicides of male victims are less likely to be solved than those of female victims after adjusting for age and race. Additionally, Albuquerque, NM has the highest adjusted OR. This means that homicides of male victims had the highest likelihood of being solved than that of female victims of all 50 cities after adjusting for age and race.
