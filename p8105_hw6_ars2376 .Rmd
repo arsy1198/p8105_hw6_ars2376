@@ -140,3 +140,104 @@ ci_beta = quantile(bootstrap$beta, c(.025, .975))
 print(ci_r2)
 print(ci_beta)
 ```
+
+## Problem 3
+
+```{r}
+childbw_df = read.csv("birthweight.csv", na = c("NA", ".", "")) |> 
+  janitor::clean_names() |> 
+  mutate(
+    babysex = case_match(
+      babysex,
+      1 ~ "Male",
+      2 ~ "Female"
+    )
+  ) |> 
+  mutate(
+    frace = case_match(
+      frace,
+      1 ~ "White",
+      2 ~ "Black",
+      3 ~ "Asian",
+      4 ~ "Puerto Rican",
+      8 ~ "Other",
+      9 ~ "Unknown"
+      )
+  ) |> 
+  mutate(
+    malform = case_match(
+      malform,
+      0 ~ "Absent",
+      1 ~ "Present"
+    )
+  ) |> 
+  mutate(
+    mrace = case_match(
+      mrace,
+      1 ~ "White",
+      2 ~ "Black",
+      3 ~ "Asian",
+      4 ~ "Puerto Rican",
+      8 ~ "Other"
+  )
+)
+
+map(childbw_df, ~sum(is.na(.x)))
+```
+
+Regression model for birth weight
+
+```{r}
+bw_model = lm(bwt~ babysex + malform + mrace + fincome + gaweeks + momage + smoken + parity + ppbmi, data = childbw_df)
+```
+
+The regression model was based off existing literature, which found the baby's sex, potential birth defects, gestational age, the mother's race, the mom's age at delivery, if the mother smokes, the mom's weight, number of live births before this pregnancy, and the family's income to be important factors influencing the baby's birth weight.
+
+```{r}
+childbw_df |> 
+  add_predictions(bw_model, var = "pred") |> 
+  add_residuals(bw_model, var = "resid") |> 
+  ggplot(aes(pred, resid)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess") +
+  labs(
+    title = "Residuals vs Fitted Values of Proposed Model",
+    x = "Fitted Values",
+    y = "Residuals"
+  ) 
+```
+
+Comparison Models
+
+```{r, warning = FALSE}
+model1 = lm(bwt ~ blength + gaweeks, data = childbw_df)
+
+model2 = lm(bwt ~ bhead * blength * babysex, data = childbw_df)
+
+crossval = crossv_mc(childbw_df, 100) 
+
+crossval_results = crossval |> 
+  mutate(
+    trainmodel_orig = map(train, ~ lm(bwt ~ babysex + malform + mrace + fincome + gaweeks + momage + smoken + parity + ppbmi, data = .x)),
+    trainmodel1 = map(train, ~ lm(bwt ~ blength + gaweeks, data = .x)),
+    trainmodel2 = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x))
+  ) |> 
+mutate(
+  rmse_orig = map2_dbl(trainmodel_orig, test, ~ rmse(model = .x, data = .y)),
+  rmse_model1 = map2_dbl(trainmodel1, test, ~ rmse(model = .x, data = .y)),
+  rmse_model2 = map2_dbl(trainmodel2, test, ~ rmse(model = .x, data = .y))
+)
+
+```
+
+Cross-validated prediction error
+
+```{r}
+crossval_results |> 
+  summarize(
+    mean_rmse_orig = mean(rmse_orig),
+    mean_rmse_model1 = mean(rmse_model1),
+    mean_rmse_model2 = mean(rmse_model2)
+  ) |> print()
+```
+
